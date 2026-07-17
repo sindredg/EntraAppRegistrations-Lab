@@ -1,48 +1,66 @@
-# Entra ID App Registration home lab
+# Entra ID App Registration Lab
 
-This is my personal record of a hands on lab based on the Microsoft Learn module "Implement app registration" (SC-300 track). I did it in my own tenant with an Entra ID P2 license. The point of this repo is to remember what I did, learn from it, and have something to look back at later. It is a learning journal, not a showcase.
+A hands on lab implementing the full application authorization chain in Microsoft Entra ID, inspired by the Microsoft Learn module *Implement app registration* (SC-300). It registers a protected API, two client applications, and drives authorization end to end: exposing scopes, granting consent, defining app roles, assigning access through groups, and enforcing the resulting token claims in a working .NET 8 API.
 
-I did the Entra portal work myself. For the last part, the small .NET API that reads the tokens, I used Claude to help me write and debug the code.
+Built and tested in a tenant with an Entra ID P2 license. The Entra configuration was performed manually. The accompanying .NET API was written with assistance from Claude.
 
-## Start here
+## Overview
 
-- **[docs/walkthrough.md](docs/walkthrough.md)** is the main thing. Goal, overview, every step I did with screenshots, what happened, what went wrong, and what I learned.
-- **[docs/architecture.md](docs/architecture.md)** is how it all fits together and how the same pattern works in the real world, including the app registration versus enterprise application separation that I keep needing to remember.
+Three application identities are registered around one protected resource:
 
-## What I built
+| Application | Role | Access model |
+|---|---|---|
+| Employees API | The protected resource. Exposes scopes and app roles and enforces them in code. | Validates tokens |
+| Employees Client | Interactive web app. Calls the API on behalf of a signed in user. | Delegated (`scp`) |
+| Employees Daemon | Background job with no user. Calls the API as itself. | Application (`roles`) |
 
-Three app identities around one protected API:
+The scenario models an in house HR Portal: the API is the backend, the Client is the web app the HR team signs into, and the Daemon is an unattended payroll sync job.
 
-- **Employees API**, the resource. Exposes scopes and app roles, and its code enforces them.
-- **Employees Client**, an interactive web app. Calls the API as a signed in user (delegated).
-- **Employees Daemon**, a background job. Calls the API as itself with no user (application permission).
+## Documentation
 
-The scenario I used to make it concrete is an in house HR Portal: the API is the backend, the Client is the web app HR signs into, the Daemon is a nightly payroll job.
+- **[docs/walkthrough.md](docs/walkthrough.md)** — the lab step by step, with screenshots, what happened at each stage, issues encountered, and the fixes.
+- **[docs/architecture.md](docs/architecture.md)** — the design, the token flow, how the pattern maps to a real product, and the distinction between an app registration and an enterprise application.
+- **[docs/lab-guide.md](docs/lab-guide.md)** — a reusable, fully explained procedure for reproducing the lab.
+- **[src/EmployeesApi/README.md](src/EmployeesApi/README.md)** — the API code, its enforcement logic, and how to run it.
 
-## Repo layout
+## Repository structure
 
 ```
 .
 ├── README.md
 ├── docs/
-│   ├── walkthrough.md     what I did, step by step, with screenshots and learnings
-│   ├── architecture.md    design, how it works, real world, registration vs enterprise app
-│   ├── lab-guide.md       the reusable how to, every step explained, if I want to redo it
-│   ├── notes.md           my raw working notes
-│   └── screenshots/       the portal and terminal screenshots
+│   ├── walkthrough.md      the lab, step by step, with screenshots
+│   ├── architecture.md     design, token flow, real world mapping
+│   ├── lab-guide.md         reusable procedure to reproduce the lab
+│   ├── notes.md             working notes and commands
+│   └── screenshots/         portal and terminal screenshots
 └── src/
-    └── EmployeesApi/      the minimal .NET 8 API that reads the claims
+    └── EmployeesApi/        minimal .NET 8 API that enforces token claims
+        ├── README.md
         ├── Program.cs
         ├── appsettings.json
         └── EmployeesApi.csproj
 ```
 
-## The one idea to hold onto
+## Core concept
 
-Nothing an app "has" is real until it shows up as a claim in a signed token. Everything I configured in the portal (scopes, consent, roles, group assignment) only mattered because it changed what ended up in the token, and the API decides allow or deny purely from those claims. The lab clicked when I ran the API and watched the same token get a 200 on one endpoint and a 403 on another, based only on its `roles` claim.
+Authorization decisions are made entirely from the claims in a signed access token. Portal configuration (scopes, consent, app roles, group assignments) matters only because it determines what appears in the token. The API validates the token, then reads `scp` and `roles` to allow or deny each request. The same token returns 200 on one endpoint and 403 on another, based solely on its `roles` claim.
 
-## Note to self
+- Delegated tokens carry `scp` and a user identity, capped at that user's privilege.
+- Application (app only) tokens carry `roles` and no user, and always require admin consent.
+- Capabilities are defined on the app registration; users and groups are assigned on the enterprise application.
 
-- Rotate the daemon secret and reset the test user passwords. They were in my scratch notes in plain text.
-- Define capabilities on the app registration, assign them on the enterprise application.
-- Delegated tokens carry `scp` and a user, app only tokens carry `roles` and no user.
+## Running the API
+
+```bash
+cd src/EmployeesApi
+dotnet run
+```
+
+The API listens on `http://localhost:5080`. See [src/EmployeesApi/README.md](src/EmployeesApi/README.md) for acquiring tokens and testing the endpoints.
+
+## Security
+
+- No secrets are committed. Tenant and client identifiers in `appsettings.json` are not secrets, but they do identify the tenant.
+- The client secret used during the lab must be rotated, and any test credentials reset, before this configuration is reused.
+- Production workloads should use certificate credentials over client secrets, apply least privilege scopes, and protect workload identities with their own Conditional Access policies.

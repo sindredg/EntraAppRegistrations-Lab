@@ -1,16 +1,16 @@
-# Walkthrough: what I did, step by step
+# Walkthrough: the lab, step by step
 
-This is the record of the lab in the order I actually did it, what happened at each step, and what I learned. I did the Entra IAM work myself. For the last part, the small .NET API that reads the tokens, I used Claude to help me write and debug it.
+This is the record of the lab in the order it was carried out, what happened at each step, and the takeaways. The Entra work was done in the portal by hand. For the last part, the small .NET API that reads the tokens, Claude helped write and debug it.
 
 Screenshots live in `screenshots/` and are referenced inline.
 
 ## Goal
 
-Experiment with how app registrations and authorization actually work in Microsoft Entra ID by building the whole chain myself, then proving it with real tokens. Not just reading the module, but registering the apps, exposing scopes, defining roles, assigning through groups, and watching the claims show up in tokens. The final step was to run a real API that reads those claims and returns 200 or 403, so I could see authorization happen instead of just reading about it.
+See how app registrations and authorization actually work in Microsoft Entra ID by building the whole chain end to end, then proving it with real tokens. Not just reading the module, but registering the apps, exposing scopes, defining roles, assigning through groups, and watching the claims show up in tokens. The final step runs a real API that reads those claims and returns 200 or 403, so authorization can be observed happening rather than just read about.
 
 ## Overview
 
-I built three app identities around one protected API, in my own tenant with an Entra ID P2 license:
+Three app identities were built around one protected API, in a single tenant with an Entra ID P2 license:
 
 - **Employees API**, the resource. Exposes scopes and app roles, and its code enforces them.
 - **Employees Client**, an interactive web app. Calls the API as a signed in user (delegated).
@@ -22,55 +22,55 @@ For the full picture of how these talk to each other and how it maps to the real
 
 ### 1. Registered the Employees API and exposed two scopes
 
-I registered the API, set its Application ID URI to `api://1769ebb1-8942-4e34-a500-4c50a9aad16e`, and exposed two delegated scopes: `Employees.Read.All` (admins and users can consent) and `Employees.Write.All` (admins only).
+The API registration represents the resource that will be protected. It was given the Application ID URI `api://1769ebb1-8942-4e34-a500-4c50a9aad16e`, which is the unique identifier that prefixes every scope. Two delegated scopes were exposed: `Employees.Read.All` (admins and users can consent) and `Employees.Write.All` (admins only).
 
 ![Two scopes on the API](screenshots/expose-api-scopes.png)
 
-What happened: both scopes showed up in Expose an API, enabled. The full scope string is the App ID URI plus the scope name.
+What happened: both scopes appear in Expose an API, enabled. Exposing a scope publishes a named permission that a client can later request. The full scope string a client asks for is the App ID URI plus the scope name, for example `api://.../Employees.Read.All`.
 
-Notes: splitting read and write, and gating write behind admin only consent, is least privilege in action. "Who can consent" is the first authorization gate.
+Notes: splitting read and write, and gating write behind admin only consent, is least privilege in action. "Who can consent" is the first authorization gate, it decides whether an ordinary user can approve the permission or whether an admin has to.
 
 ### 2. Added an app only role for the daemon
 
-On the API I created an app role with member type Applications, value `app-Employees.Read.All`. This is the permission the daemon will hold.
+A custom API declares application (app only) permissions as app roles with member type Applications. One was created with value `app-Employees.Read.All`. This is the permission the daemon will hold when it calls the API with no user present.
 
 ![App only role](screenshots/app-role-app-only.png)
 
-Notes: app only permissions on a custom API are surfaced as app roles with member type Applications. Delegated is for users, this is for workloads.
+Notes: delegated scopes are for a signed in user, app roles with member type Applications are for workloads. Same API, two separate ways to grant access depending on whether a human is in the loop.
 
 ### 3. Registered the Employees Client and the Daemon, added credentials
 
-Registered the Employees Client as a single tenant app with redirect `https://jwt.ms` so I could read tokens in the browser.
+The client apps are separate registrations from the API. The Employees Client was registered as a single tenant app with redirect `https://jwt.ms`, which lets a token be returned to the browser and decoded there.
 
 ![Register the client](screenshots/register-client.png)
 
-Registered the Employees Daemon and gave it a client secret. The portal only shows the secret value once.
+The Employees Daemon was registered and given a client secret. A confidential client authenticates as itself with a credential, and the portal only shows the secret value once.
 
 ![Daemon secret](screenshots/daemon-secret.png)
 
-Notes: a confidential client proves itself with a credential. A secret is easy but a leaked string is full compromise, a certificate is the production choice.
+Notes: a secret is a password string, easy to use but full compromise if it leaks. A certificate is the production choice because a private key is much harder to steal.
 
 ### 4. Wired the clients to the API and granted consent
 
-On the Client I added the two delegated permissions.
+Adding a permission on a client only declares intent. It is not usable until it is consented. Two delegated permissions were added on the Client.
 
 ![Add delegated permissions](screenshots/client-delegated-permissions.png)
 
-Then granted admin consent, and the status flipped to granted for the tenant.
+Admin consent was then granted, and the status flipped to granted for the tenant. Tenant wide consent records the grant once for everyone, so no user sees a consent prompt.
 
 ![Delegated consent granted](screenshots/consent-delegated-granted.png)
 
-On the Daemon I added the app only permission and granted admin consent (the only way app only permissions can ever be granted).
+On the Daemon the app only permission was added and admin consent granted. Admin consent is the only way an app only permission can ever be granted, because there is no user at runtime to approve it.
 
 ![App only consent granted](screenshots/consent-apponly-granted.png)
 
-Notes: requesting a permission and having it are different things. Consent is the grant. Watching the status go from not granted to granted for the tenant is the whole point.
+Notes: requesting a permission and having it are different things. Consent is the grant. The status going from not granted to granted for the tenant is the moment the permission becomes real.
 
 ### 5. Set up the users and groups
 
-Created users "Sindre Writer" (job title: "Survey Author", department: "HR") and user "Sindre Plain" (job title: "Analyst", department "HR"). "Sindre Plain" will be my control case, and should end up with no roles.
+Created users "Sindre Writer" (job title: "Survey Author", department: "HR") and user "Sindre Plain" (job title: "Analyst", department "HR"). "Sindre Plain" is the control case, and should end up with no roles.
 
-Made an HR group with a dynamic membership rule (department equals HR), and a security group HR-Survey-Writers with just Sindre Writer in it.
+Two groups back the setup: an HR group with a dynamic membership rule (department equals HR), which auto includes anyone whose department attribute is HR, and a security group HR-Survey-Writers with just Sindre Writer in it. The app role will be assigned to this second group.
 
 NR Security Group:
 ![Dynamic rule department equals HR](screenshots/group-dynamic-rule-hr.png)
@@ -79,63 +79,63 @@ NR Security Group:
 HR Survey Writers Security Group:
 ![Survey Writers group members](screenshots/group-survey-writers-members.png)
 
-Notes: driving membership by an attribute like department is the P2 dynamic group feature, and it is how access scales without hand editing.
+Notes: driving membership by an attribute like department is the P2 dynamic group feature, and it is how access scales without hand editing membership.
 
 ### 6. Assigned the role through the group (on the enterprise app)
 
-On the Employees API enterprise application, Users and groups, I assigned the HR-Survey-Writers group to the Survey Writer role.
+On the Employees API enterprise application, Users and groups, the HR-Survey-Writers group was assigned to the Survey Writer role. Every member of the group inherits the role, and it will surface in each member's token as a `roles` claim.
 
 ![Group assigned to role](screenshots/enterprise-app-group-role-assignment.png)
 
-Notes: Define the role on the app registration, but assign it on the enterprise application. The registration is the blueprint, the enterprise app is the running instance where assignments and logs live. This is spelled out in `architecture.md`.
+Notes: the role is defined on the app registration, but assigned on the enterprise application. The registration is the blueprint, the enterprise app is the running instance where assignments and logs live. This is spelled out in `architecture.md`.
 
 ### 7. Got a delegated token and read the claims
 
-First try in the browser failed with error unsupported_response_type.
+The first browser attempt failed with error unsupported_response_type, because the app was not allowed to return a token to the browser yet.
 
 ![Unsupported response type error](screenshots/error-unsupported-response-type.png)
 
-The Access tokens checkbox was not ticked on the client. I enabled it under Authentication, implicit grant.
+The Access tokens checkbox was not ticked on the client. Enabling it under Authentication, implicit grant, allows the token to come straight back to the browser.
 
 ![Enable access tokens](screenshots/fix-enable-access-tokens.png)
 
-Then signed in as user "Sindre Writer" (member of the Survey Writers group) and the token came back. It had `scp` with the scopes, and `roles` with Survey.Create (which came in through the group), and `aud` set to the API.
+Signed in as user "Sindre Writer" (member of the Survey Writers group) and the token came back. It carried `scp` with the consented scopes, `roles` with Survey.Create (inherited through the group), and `aud` set to the API, meaning the token is addressed to the Employees API and nothing else.
 
 ![Writer token scp](screenshots/writer-token-roles-scp.png)
 
-Signed in as user "Sindre Plain" (Member of the HR group only) and the token had the same `scp` but no `roles` claim at all. That is the control case working.
+Signed in as user "Sindre Plain" (member of the HR group only) and the token had the same `scp` but no `roles` claim at all. That is the control case working: same app, same scopes, but no role because there is no assignment.
 
-Notes: everything I set up was invisible until here. The user token carries what the app may do (`scp`) and what the user may do (`roles`), and the only difference between Writer and Plain is the group driven role.
+Notes: everything set up earlier was invisible until here. A user token carries what the app may do (`scp`) and what the user may do (`roles`), and the only difference between Writer and Plain is the group driven role.
 
 ### 8. Got an app only token for the daemon
 
-Ran the client credentials request from WSL (no browser, no user). The daemon token had `roles: app-Employees.Read.All`, no `scp`, no user claims, `appid` was the daemon, and `appidacr` was 1 meaning it authenticated with a secret.
+The client credentials request was run from WSL, with no browser and no user. The daemon token carried `roles: app-Employees.Read.All`, no `scp`, no user claims, `appid` set to the daemon, and `appidacr` of 1 meaning it authenticated with a secret.
 
 ![Daemon token roles](screenshots/curl-post-deamon)
 
-Notes: app only tokens carry permissions in `roles`, not `scp`, and there is no user. The secret is the login, so no interactive sign in happens at all.
+Notes: app only tokens carry permissions in `roles`, not `scp`, and there is no user identity in them. The secret is the login, so no interactive sign in happens at all. This is the concrete contrast to the user tokens in step 7.
 
 ### 9. Checked the sign in logs
 
-Filtered sign in logs to the Employees app. User sign ins (interactive) showed "Sindre Writer" and "Sindre Plain" hitting Employees Client with resource Employees API, Conditional Access success, MFA satisfied.
+Sign in logs were filtered to the Employees app. User sign ins (interactive) show "Sindre Writer" and "Sindre Plain" hitting Employees Client with resource Employees API, Conditional Access success, MFA satisfied.
 
 ![Sign in logs, users with MFA](screenshots/signin-logs-users-mfa.png)
 
-Notes: the tenant enforces MFA through Conditional Access, so both users had to do MFA before a token was issued. The daemon, on the service principal sign ins tab, had Conditional Access not applied, because there is no user for a user policy to target.
+Notes: the tenant enforces MFA through Conditional Access, so both users had to complete MFA before a token was issued. The daemon, on the service principal sign ins tab, shows Conditional Access not applied, because a user targeted policy has no user to act on. This is why workload identities need their own protection rather than MFA.
 
-### 10. Ran a real API that enforces the claims (the part I used Claude for)
+### 10. Ran a real API that enforces the claims (the part Claude helped with)
 
-With Claude I wrote a small .NET 8 API with two endpoints, `/employees/all` (needs the app only role) and `/surveys` (needs the user role Survey.Create). The idea was to feed it my real tokens and watch it allow or deny.
+A small .NET 8 API was written with two endpoints, `/employees/all` (needs the app only role) and `/surveys` (needs the user role Survey.Create). The API validates each incoming token, then reads its claims and decides allow or deny. The plan was to feed it the real tokens and watch the outcome.
 
-First run, I tested with placeholder text instead of a real token and got 401, which is correct, the API rejected garbage.
+First run, a placeholder string was sent instead of a real token and the API returned 401, which is correct, it rejected input that was not a valid token.
 
 ![First run, 401 on placeholder](screenshots/api-first-run-401-placeholder.png)
 
-Then with a real daemon token I got 403 on `/employees/all` even though the token clearly had the role. This one took some debugging.
+Then with a real daemon token the endpoint returned 403 even though the token clearly had the role. This took some debugging (see the section below).
 
 ![API valid token but 403](screenshots/api-valid-token-403.png)
 
-The API started validating tokens properly (valid signature, audience validated) once the code was fixed.
+After the fix, the API validated tokens properly (valid signature, audience validated) and the role check matched.
 
 Final run: `/employees/all` returned 200 with the daemon token, and `/surveys` returned 403 with the same token because it has no Survey.Create.
 
@@ -146,29 +146,22 @@ WSL dotnet run shell:
 ![API validating the token](screenshots/api-validating-token.png)
 
 
-Learning: same token, two endpoints, two outcomes, all decided by the `roles` claim. This is the moment the whole lab clicked. The portal config becomes a claim, the claim becomes an allow or deny in code.
+Takeaway: same token, two endpoints, two outcomes, all decided by the `roles` claim. This is the moment the whole chain connects. The portal config becomes a claim in the token, and the claim becomes an allow or deny in code.
 
-## What went wrong and how I fixed it
+## What went wrong and how it was fixed
 
-Keeping these because the mistakes taught me the most.
+Keeping these because the mistakes were the most instructive part.
 
 1. **unsupported_response_type** in the browser. The Access tokens checkbox was off on the client. Fixed under Authentication, implicit grant.
 2. **Build error, VerifyUserHasAnyAcceptedScope not found.** That helper moved in newer Microsoft.Identity.Web. Switched to reading the `scp` claim directly.
 3. **403 even though the token had the role.** The Entra `roles` claim gets remapped to a long schema URI, so IsInRole and RequireRole never matched. Fixed with `JsonWebTokenHandler.DefaultMapInboundClaims = false` and reading the `roles` claim directly. This is in `src/EmployeesApi/Program.cs`.
 
-## Notes, the short list
+## Notes, short list
 
 - Nothing is real until it is a claim in a signed token. The API decides everything from claims.
-- Delegated equals a user is present, capped at that user, permission lands in `scp`. Application equals no user, full privilege, permission lands in `roles`, admin consent always.
+- Delegated means a user is present, capped at that user, permission lands in `scp`. Application means no user, full privilege, permission lands in `roles`, admin consent always.
 - App registration is the blueprint, enterprise application is the running instance. Define on the registration, assign on the enterprise app.
 - Assigning a role to a group is how access scales. Membership drives access with no code change.
 - An access token is for exactly one resource, that is `aud`.
 - Conditional Access and MFA protect user sign ins, not daemons. Workload identities need certificates, rotation, and their own policies.
 - Consent is the grant. Requesting a permission is not the same as having it.
-
-## Cleanup checklist
-
-- Rotate the daemon secret (it was in my scratch notes in plain text).
-- Reset the Sindre Writer and Sindre Plain passwords.
-- Delete the three app registrations if I do not need them (this removes the enterprise apps too).
-- Remove the group role assignment.

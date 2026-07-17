@@ -24,7 +24,7 @@ For the full picture of how these talk to each other and how it maps to the real
 
 I registered the API, set its Application ID URI to `api://1769ebb1-8942-4e34-a500-4c50a9aad16e`, and exposed two delegated scopes: `Employees.Read.All` (admins and users can consent) and `Employees.Write.All` (admins only).
 
-![Two scopes on the API](screenshots/01-expose-api-scopes.png)
+![Two scopes on the API](screenshots/expose-api-scopes.png)
 
 What happened: both scopes showed up in Expose an API, enabled. The full scope string is the App ID URI plus the scope name.
 
@@ -34,7 +34,7 @@ Notes: splitting read and write, and gating write behind admin only consent, is 
 
 On the API I created an app role with member type Applications, value `app-Employees.Read.All`. This is the permission the daemon will hold.
 
-![App only role](screenshots/02-app-role-app-only.png)
+![App only role](screenshots/app-role-app-only.png)
 
 Notes: app only permissions on a custom API are surfaced as app roles with member type Applications. Delegated is for users, this is for workloads.
 
@@ -42,11 +42,11 @@ Notes: app only permissions on a custom API are surfaced as app roles with membe
 
 Registered the Employees Client as a single tenant app with redirect `https://jwt.ms` so I could read tokens in the browser.
 
-![Register the client](screenshots/03-register-client.png)
+![Register the client](screenshots/register-client.png)
 
 Registered the Employees Daemon and gave it a client secret. The portal only shows the secret value once.
 
-![Daemon secret](screenshots/04-daemon-secret.png)
+![Daemon secret](screenshots/daemon-secret.png)
 
 Notes: a confidential client proves itself with a credential. A secret is easy but a leaked string is full compromise, a certificate is the production choice.
 
@@ -54,15 +54,15 @@ Notes: a confidential client proves itself with a credential. A secret is easy b
 
 On the Client I added the two delegated permissions.
 
-![Add delegated permissions](screenshots/05-client-delegated-permissions.png)
+![Add delegated permissions](screenshots/client-delegated-permissions.png)
 
 Then granted admin consent, and the status flipped to granted for the tenant.
 
-![Delegated consent granted](screenshots/06-consent-delegated-granted.png)
+![Delegated consent granted](screenshots/consent-delegated-granted.png)
 
 On the Daemon I added the app only permission and granted admin consent (the only way app only permissions can ever be granted).
 
-![App only consent granted](screenshots/07-consent-apponly-granted.png)
+![App only consent granted](screenshots/consent-apponly-granted.png)
 
 Notes: requesting a permission and having it are different things. Consent is the grant. Watching the status go from not granted to granted for the tenant is the whole point.
 
@@ -73,11 +73,11 @@ Created users "Sindre Writer" (job title: "Survey Author", department: "HR") and
 Made an HR group with a dynamic membership rule (department equals HR), and a security group HR-Survey-Writers with just Sindre Writer in it.
 
 NR Security Group:
-![Dynamic rule department equals HR](screenshots/10-group-dynamic-rule-hr.png)
-![Survey Writers group members](screenshots/11-group-survey-writers-members.png)
+![Dynamic rule department equals HR](screenshots/group-dynamic-rule-hr.png)
+![Survey Writers group members](screenshots/group-hr-members.png)
 
 HR Survey Writers Security Group:
-![Survey Writers group members](screenshots/11-group-survey-writers-members.png)
+![Survey Writers group members](screenshots/group-survey-writers-members.png)
 
 Notes: driving membership by an attribute like department is the P2 dynamic group feature, and it is how access scales without hand editing.
 
@@ -85,7 +85,7 @@ Notes: driving membership by an attribute like department is the P2 dynamic grou
 
 On the Employees API enterprise application, Users and groups, I assigned the HR-Survey-Writers group to the Survey Writer role.
 
-![Group assigned to role](screenshots/12-enterprise-app-group-role-assignment.png)
+![Group assigned to role](screenshots/enterprise-app-group-role-assignment.png)
 
 Notes: Define the role on the app registration, but assign it on the enterprise application. The registration is the blueprint, the enterprise app is the running instance where assignments and logs live. This is spelled out in `architecture.md`.
 
@@ -93,11 +93,11 @@ Notes: Define the role on the app registration, but assign it on the enterprise 
 
 First try in the browser failed with error unsupported_response_type.
 
-![Unsupported response type error](screenshots/13-error-unsupported-response-type.png)
+![Unsupported response type error](screenshots/error-unsupported-response-type.png)
 
 The Access tokens checkbox was not ticked on the client. I enabled it under Authentication, implicit grant.
 
-![Enable access tokens](screenshots/14-fix-enable-access-tokens.png)
+![Enable access tokens](screenshots/fix-enable-access-tokens.png)
 
 Then signed in as user "Sindre Writer" (member of the Survey Writers group) and the token came back. It had `scp` with the scopes, and `roles` with Survey.Create (which came in through the group), and `aud` set to the API.
 
